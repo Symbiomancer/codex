@@ -5,6 +5,7 @@ pub(super) const WORKSPACE_NUDGE_VIEW_ID: &str = "workspace-usage-nudge";
 use crate::bottom_pane::ActionableBanner;
 use crate::model_catalog::LUNA_RESERVE_MODEL;
 use codex_app_server_protocol::CodexErrorInfo as AppServerCodexErrorInfo;
+use codex_model_provider_info::OPENAI_PROVIDER_ID;
 use uuid::Uuid;
 
 pub(super) struct PendingCreditsNudge {
@@ -188,7 +189,7 @@ fn has_usable_workspace_credits(credits: &CreditsSnapshot) -> bool {
 }
 
 impl ChatWidget {
-    /// Poll more often near exhaustion for every ChatGPT account, independently of experiments.
+    /// Poll account usage only for the native OpenAI provider.
     pub(crate) fn rate_limit_refresh_interval(&self) -> Option<std::time::Duration> {
         if !self.should_prefetch_rate_limits() {
             return None;
@@ -235,6 +236,22 @@ impl ChatWidget {
         self.on_rate_limit_snapshot_from(snapshot, RateLimitSnapshotSource::AccountUsage);
     }
 
+    pub(super) fn set_model_provider_id(&mut self, provider_id: String) {
+        if self.config.model_provider_id == provider_id {
+            return;
+        }
+        self.config.model_provider_id = provider_id;
+        self.rate_limit_snapshots_by_limit_id.clear();
+        self.plan_type = None;
+        self.codex_rate_limit_reached_type = None;
+        self.codex_spend_control_reached = None;
+        self.rate_limit_warnings = RateLimitWarningState::default();
+        self.usage_notice_state = usage_notice::UsageNoticeState::default();
+        self.rate_limit_switch_prompt = RateLimitSwitchPromptState::Idle;
+        self.bottom_pane
+            .dismiss_view_by_id(RATE_LIMIT_SWITCH_PROMPT_VIEW_ID);
+    }
+
     pub(crate) fn on_rolling_rate_limit_snapshot(&mut self, snapshot: RateLimitSnapshot) {
         if let (Some(previous), Some(current)) = (
             self.codex_rate_limit_reached_type,
@@ -254,6 +271,12 @@ impl ChatWidget {
         snapshot: Option<RateLimitSnapshot>,
         source: RateLimitSnapshotSource,
     ) {
+        let uses_native_openai_provider = self.config.model_provider_id == OPENAI_PROVIDER_ID;
+        if matches!(source, RateLimitSnapshotSource::AccountUsage) && !uses_native_openai_provider {
+            // A local account read is separate from quota reported by a custom provider.
+            return;
+        }
+
         let usage_notice_blocked = self.codex_rate_limit_reached_type.is_some()
             || self.codex_spend_control_reached == Some(true);
         if let Some(mut snapshot) = snapshot {
@@ -269,7 +292,8 @@ impl ChatWidget {
             {
                 self.request_redraw();
             }
-            if matches!(source, RateLimitSnapshotSource::RollingUpdate)
+            if uses_native_openai_provider
+                && matches!(source, RateLimitSnapshotSource::RollingUpdate)
                 && snapshot.credits.is_none()
             {
                 snapshot.credits = self
@@ -282,7 +306,11 @@ impl ChatWidget {
                         balance: credits.balance.clone(),
                     });
             }
-            self.plan_type = snapshot.plan_type.or(self.plan_type);
+            if uses_native_openai_provider {
+                self.plan_type = snapshot.plan_type.or(self.plan_type);
+            } else if matches!(source, RateLimitSnapshotSource::RollingUpdate) {
+                self.plan_type = snapshot.plan_type;
+            }
 
             if is_codex_limit
                 && (matches!(source, RateLimitSnapshotSource::AccountUsage)
@@ -371,9 +399,13 @@ impl ChatWidget {
                 self.rate_limit_switch_prompt = RateLimitSwitchPromptState::Pending;
             }
 
-            // /wham/usage identifies ordinary and additional model limits separately. Streamed
-            // updates still drive warnings/recovery above, but must not overwrite status data.
-            if matches!(source, RateLimitSnapshotSource::AccountUsage) {
+            // Native OpenAI status comes from account-usage reads. Other providers supply their
+            // own quota with model responses, so never substitute the local OpenAI account.
+            let updates_status_data = match source {
+                RateLimitSnapshotSource::AccountUsage => uses_native_openai_provider,
+                RateLimitSnapshotSource::RollingUpdate => !uses_native_openai_provider,
+            };
+            if updates_status_data {
                 let limit_label = snapshot
                     .limit_name
                     .clone()
@@ -416,8 +448,10 @@ impl ChatWidget {
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(super) fn should_prefetch_rate_limits(&self) -> bool {
-        self.requires_openai_auth && self.has_chatgpt_account
+    pub(crate) fn should_prefetch_rate_limits(&self) -> bool {
+        self.config.model_provider_id == OPENAI_PROVIDER_ID
+            && self.requires_openai_auth
+            && self.has_chatgpt_account
     }
 
     fn lower_cost_preset(&self) -> Option<ModelPreset> {

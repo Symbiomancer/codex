@@ -7,6 +7,7 @@ use crate::chatwidget::rate_limits::get_limits_duration;
 use crate::chatwidget::realtime::tests::activate_voice_for_thread;
 use codex_app_server_protocol::SpendControlLimitSnapshot;
 use codex_app_server_protocol::ThreadUsage;
+use codex_model_provider_info::OPENAI_PROVIDER_ID;
 use pretty_assertions::assert_eq;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -622,6 +623,7 @@ async fn configured_pet_load_is_deferred_until_after_construction() {
 #[tokio::test]
 async fn prefetch_rate_limits_is_gated_on_chatgpt_auth_provider() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.set_model_provider_id(OPENAI_PROVIDER_ID.to_string());
 
     assert!(!chat.should_prefetch_rate_limits());
 
@@ -633,6 +635,10 @@ async fn prefetch_rate_limits_is_gated_on_chatgpt_auth_provider() {
     // Conversely, a local OpenAI provider cannot enable usage for a different server.
     chat.config.model_provider.requires_openai_auth = true;
     chat.requires_openai_auth = false;
+    assert!(!chat.should_prefetch_rate_limits());
+
+    chat.requires_openai_auth = true;
+    chat.set_model_provider_id("custom-provider".to_string());
     assert!(!chat.should_prefetch_rate_limits());
 
     chat.prefetch_rate_limits();

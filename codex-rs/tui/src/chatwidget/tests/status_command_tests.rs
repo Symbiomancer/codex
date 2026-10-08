@@ -89,6 +89,67 @@ async fn status_command_renders_immediately_without_rate_limit_refresh() {
 }
 
 #[tokio::test]
+async fn status_command_uses_streamed_quota_for_routed_provider() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    set_chatgpt_auth(&mut chat);
+
+    chat.set_model_provider_id("openai".to_string());
+    let mut local_account_quota = snapshot(/*percent*/ 10.0);
+    local_account_quota.credits = Some(CreditsSnapshot {
+        has_credits: true,
+        unlimited: false,
+        balance: Some("46290".to_string()),
+    });
+    chat.on_rate_limit_snapshot(Some(local_account_quota));
+    assert_eq!(
+        chat.rate_limit_snapshots_by_limit_id
+            .get("codex")
+            .and_then(|snapshot| snapshot.primary.as_ref())
+            .map(|window| window.used_percent),
+        Some(10.0)
+    );
+
+    chat.set_model_provider_id("weave".to_string());
+    assert!(chat.rate_limit_snapshots_by_limit_id.is_empty());
+    chat.on_rolling_rate_limit_snapshot(snapshot(/*percent*/ 92.0));
+    chat.on_rate_limit_snapshot(Some(snapshot(/*percent*/ 10.0)));
+
+    assert_eq!(
+        chat.rate_limit_snapshots_by_limit_id
+            .get("codex")
+            .and_then(|snapshot| snapshot.primary.as_ref())
+            .map(|window| window.used_percent),
+        Some(92.0),
+        "local account usage must not overwrite the routed provider's quota"
+    );
+    assert!(
+        chat.rate_limit_snapshots_by_limit_id
+            .get("codex")
+            .is_some_and(|snapshot| snapshot.credits.is_none()),
+        "routed usage must not inherit credits from the local OpenAI account"
+    );
+
+    while rx.try_recv().is_ok() {}
+    chat.dispatch_command(SlashCommand::Status);
+
+    let rendered = match rx.try_recv() {
+        Ok(AppEvent::InsertHistoryCell(cell)) => {
+            lines_to_single_string(&cell.display_lines(/*width*/ 80))
+        }
+        other => panic!("expected routed status output, got {other:?}"),
+    };
+    assert!(
+        rendered.contains("8% left"),
+        "expected /status to show the routed provider's remaining quota, got: {rendered}"
+    );
+    assert!(
+        !std::iter::from_fn(|| rx.try_recv().ok())
+            .any(|event| matches!(event, AppEvent::RefreshRateLimits { .. })),
+        "routed providers must not fetch the locally signed-in account's quota"
+    );
+}
+
+#[tokio::test]
 async fn status_command_uses_catalog_default_reasoning_when_config_empty() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.5")).await;
     chat.config.model_reasoning_effort = None;

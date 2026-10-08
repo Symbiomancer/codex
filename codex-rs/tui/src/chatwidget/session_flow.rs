@@ -109,7 +109,7 @@ impl ChatWidget {
         self.current_rollout_path = session.rollout_path.clone();
         self.current_cwd = Some(session.cwd.to_path_buf());
         self.config.cwd = session.cwd.clone();
-        self.config.model_provider_id = session.model_provider_id.clone();
+        self.set_model_provider_id(session.model_provider_id.clone());
         self.set_daybreak_enabled(self.daybreak_enabled);
         if self.daybreak_enabled && previous_thread_id != self.thread_id {
             self.add_info_message("Daybreak is on for new turns.".into(), /*hint*/ None);

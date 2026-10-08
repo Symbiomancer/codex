@@ -1729,7 +1729,9 @@ impl App {
                     if !self.rate_limit_refresh_state.has_pending_recovery() {
                         self.chat_widget.finish_rate_limit_recovery();
                     }
-                    self.refresh_rate_limits(app_server, RateLimitRefreshOrigin::Periodic);
+                    if self.chat_widget.should_prefetch_rate_limits() {
+                        self.refresh_rate_limits(app_server, RateLimitRefreshOrigin::Periodic);
+                    }
                 }
             }
             AppEvent::RefreshThreadUsage {
@@ -1798,6 +1800,14 @@ impl App {
                         false
                     }
                 };
+                let accepted = accepted
+                    && (!matches!(
+                        &origin,
+                        RateLimitRefreshOrigin::StartupPrefetch { .. }
+                            | RateLimitRefreshOrigin::StatusCommand { .. }
+                            | RateLimitRefreshOrigin::Recovery
+                            | RateLimitRefreshOrigin::Periodic
+                    ) || self.chat_widget.should_prefetch_rate_limits());
                 match result {
                 Ok(response) => {
                     let rate_limit_reset_credits = response.rate_limit_reset_credits.clone();

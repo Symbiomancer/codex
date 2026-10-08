@@ -325,7 +325,7 @@ impl App {
                 }
                 self.chat_widget
                     .on_rolling_rate_limit_snapshot(notification.rate_limits.clone());
-                if workspace_hard_stop && self.chat_widget.has_chatgpt_account() {
+                if workspace_hard_stop && self.chat_widget.should_prefetch_rate_limits() {
                     // Background inference may publish a hard stop without a foreground Error.
                     self.refresh_rate_limits(app_server_client, RateLimitRefreshOrigin::Recovery);
                 }

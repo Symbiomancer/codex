@@ -258,6 +258,7 @@ impl ChatWidget {
         self.add_credits_nudge_email_in_flight = None;
         self.codex_rate_limit_reached_type = None;
         self.codex_spend_control_reached = None;
+        self.rate_limit_snapshots_by_limit_id.clear();
         self.rate_limit_warnings = RateLimitWarningState::default();
         self.usage_notice_state = usage_notice::UsageNoticeState::default();
         self.rate_limit_switch_prompt = RateLimitSwitchPromptState::Idle;
@@ -496,7 +497,7 @@ impl ChatWidget {
         self.invalidate_permission_discovery();
         let cwd_changed = self.config.cwd != settings.cwd;
         self.apply_thread_settings_cwd(settings.cwd.clone());
-        self.config.model_provider_id = settings.model_provider.clone();
+        self.set_model_provider_id(settings.model_provider.clone());
         self.set_service_tier(settings.service_tier.clone());
         if let Err(err) = self
             .config

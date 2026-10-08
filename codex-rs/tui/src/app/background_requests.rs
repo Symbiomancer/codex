@@ -109,6 +109,16 @@ impl App {
         app_server: &AppServerSession,
         origin: RateLimitRefreshOrigin,
     ) {
+        let reads_account_usage = matches!(
+            &origin,
+            RateLimitRefreshOrigin::StartupPrefetch { .. }
+                | RateLimitRefreshOrigin::StatusCommand { .. }
+                | RateLimitRefreshOrigin::Recovery
+                | RateLimitRefreshOrigin::Periodic
+        );
+        if reads_account_usage && !self.chat_widget.should_prefetch_rate_limits() {
+            return;
+        }
         if matches!(
             origin,
             RateLimitRefreshOrigin::Recovery | RateLimitRefreshOrigin::ResetConsume { .. }
